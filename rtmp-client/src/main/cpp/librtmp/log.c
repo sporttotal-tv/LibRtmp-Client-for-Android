@@ -26,6 +26,7 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
+#include <android/log.h>
 
 #include "rtmp_sys.h"
 #include "log.h"
@@ -89,10 +90,20 @@ RTMP_LogLevel RTMP_LogGetLevel()
 	return RTMP_debuglevel;
 }
 
+int RTMP_Log_return(int result, int level, const char *format, ...) {
+	va_list args;
+	va_start(args, format);
+	__android_log_vprint(ANDROID_LOG_DEBUG, "RTMP_LIB", format, args);
+	cb(level, format, args);
+	va_end(args);
+	return result;
+}
+
 void RTMP_Log(int level, const char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
+    __android_log_vprint(ANDROID_LOG_DEBUG, "RTMP_LIB", format, args);
 	cb(level, format, args);
 	va_end(args);
 }

@@ -358,7 +358,9 @@ RTMP_GetDuration(RTMP *r)
 int
 RTMP_IsConnected(RTMP *r)
 {
-  return r->m_sb.sb_socket != -1;
+    int result = r->m_sb.sb_socket != -1;
+    RTMP_Log(RTMP_LOGDEBUG, "%s: %s", __FUNCTION__, result ? "true" : "false");
+    return result;
 }
 
 int
@@ -1092,39 +1094,37 @@ SocksNegotiate(RTMP *r)
 }
 
 int
-RTMP_ConnectStream(RTMP *r, int seekTime)
-{
-  RTMPPacket packet = { 0 };
+RTMP_ConnectStream(RTMP *r, int seekTime) {
+    RTMPPacket packet = {0};
 
-  /* seekTime was already set by SetupStream / SetupURL.
-   * This is only needed by ReconnectStream.
-   */
-  if (seekTime > 0)
-    r->Link.seekTime = seekTime;
+    /* seekTime was already set by SetupStream / SetupURL.
+     * This is only needed by ReconnectStream.
+     */
+    if (seekTime > 0)
+        r->Link.seekTime = seekTime;
 
-  r->m_mediaChannel = 0;
+    r->m_mediaChannel = 0;
 
-  while (!r->m_bPlaying && RTMP_IsConnected(r) && RTMP_ReadPacket(r, &packet))
-    {
-      if (RTMPPacket_IsReady(&packet))
-	{
-	  if (!packet.m_nBodySize)
-	    continue;
-	  if ((packet.m_packetType == RTMP_PACKET_TYPE_AUDIO) ||
-	      (packet.m_packetType == RTMP_PACKET_TYPE_VIDEO) ||
-	      (packet.m_packetType == RTMP_PACKET_TYPE_INFO))
-	    {
-	      RTMP_Log(RTMP_LOGWARNING, "Received FLV packet before play()! Ignoring.");
-	      RTMPPacket_Free(&packet);
-	      continue;
-	    }
+    while (!r->m_bPlaying && RTMP_IsConnected(r) && RTMP_ReadPacket(r, &packet)) {
+        RTMP_Log(RTMP_LOGDEBUG, "%s: packetType: %i, headerType: %i", __FUNCTION__, packet.m_packetType, packet.m_headerType);
+        if (RTMPPacket_IsReady(&packet)) {
+            RTMP_Log(RTMP_LOGDEBUG, "%s: packet ready", __FUNCTION__);
+            if (!packet.m_nBodySize)
+                continue;
+            if ((packet.m_packetType == RTMP_PACKET_TYPE_AUDIO) ||
+                (packet.m_packetType == RTMP_PACKET_TYPE_VIDEO) ||
+                (packet.m_packetType == RTMP_PACKET_TYPE_INFO)) {
+                RTMP_Log(RTMP_LOGWARNING, "Received FLV packet before play()! Ignoring.");
+                RTMPPacket_Free(&packet);
+                continue;
+            }
 
-	  RTMP_ClientPacket(r, &packet);
-	  RTMPPacket_Free(&packet);
-	}
+            RTMP_ClientPacket(r, &packet);
+            RTMPPacket_Free(&packet);
+        }
     }
 
-  return r->m_bPlaying;
+    return r->m_bPlaying;
 }
 
 int
@@ -1383,115 +1383,103 @@ extern FILE *netstackdump_read;
 #endif
 
 static int
-ReadN(RTMP *r, char *buffer, int n)
-{
-  int nOriginalSize = n;
-  int avail;
-  char *ptr;
+ReadN(RTMP *r, char *buffer, int n) {
+    int nOriginalSize = n;
+    int avail;
+    char *ptr;
 
-  r->m_sb.sb_timedout = FALSE;
+    r->m_sb.sb_timedout = FALSE;
 
 #ifdef _DEBUG
-  memset(buffer, 0, n);
+    memset(buffer, 0, n);
 #endif
 
-  ptr = buffer;
-  while (n > 0)
-    {
-      int nBytes = 0, nRead;
-      if (r->Link.protocol & RTMP_FEATURE_HTTP)
-        {
-	  int refill = 0;
-	  while (!r->m_resplen)
-	    {
-	      int ret;
-	      if (r->m_sb.sb_size < 13 || refill)
-	        {
-		  if (!r->m_unackd)
-		    HTTP_Post(r, RTMPT_IDLE, "", 1);
-		  if (RTMPSockBuf_Fill(&r->m_sb) < 1)
-		    {
-		      if (!r->m_sb.sb_timedout)
-		        RTMP_Close(r);
-		      return 0;
-		    }
-		}
-	      if ((ret = HTTP_read(r, 0)) == -1)
-		{
-		  RTMP_Log(RTMP_LOGDEBUG, "%s, No valid HTTP response found", __FUNCTION__);
-		  RTMP_Close(r);
-		  return 0;
-		}
-              else if (ret == -2)
-                {
-                  refill = 1;
+    ptr = buffer;
+    while (n > 0) {
+        int nBytes = 0, nRead;
+        if (r->Link.protocol & RTMP_FEATURE_HTTP) {
+            RTMP_Log(RTMP_LOGDEBUG, "%s: protocol is HTTP", __FUNCTION__);
+            int refill = 0;
+            while (!r->m_resplen) {
+                int ret;
+                if (r->m_sb.sb_size < 13 || refill) {
+                    if (!r->m_unackd)
+                        HTTP_Post(r, RTMPT_IDLE, "", 1);
+                    if (RTMPSockBuf_Fill(&r->m_sb) < 1) {
+                        if (!r->m_sb.sb_timedout)
+                            RTMP_Close(r);
+                        return RTMP_Log_return(0, RTMP_LOGDEBUG, "%s: FAIL 1", __FUNCTION__);
+                    }
                 }
-              else
-                {
-                  refill = 0;
+                if ((ret = HTTP_read(r, 0)) == -1) {
+                    RTMP_Log(RTMP_LOGDEBUG, "%s, No valid HTTP response found", __FUNCTION__);
+                    RTMP_Close(r);
+                    return RTMP_Log_return(FALSE, RTMP_LOGDEBUG, "%s: FAIL 2", __FUNCTION__);
+                } else if (ret == -2) {
+                    refill = 1;
+                } else {
+                    refill = 0;
                 }
-	    }
-	  if (r->m_resplen && !r->m_sb.sb_size)
-	    RTMPSockBuf_Fill(&r->m_sb);
-          avail = r->m_sb.sb_size;
-	  if (avail > r->m_resplen)
-	    avail = r->m_resplen;
-	}
-      else
-        {
-          avail = r->m_sb.sb_size;
-	  if (avail == 0)
-	    {
-	      if (RTMPSockBuf_Fill(&r->m_sb) < 1)
-	        {
-	          if (!r->m_sb.sb_timedout)
-	            RTMP_Close(r);
-	          return 0;
-		}
-	      avail = r->m_sb.sb_size;
-	    }
-	}
-      nRead = ((n < avail) ? n : avail);
-      if (nRead > 0)
-	{
-	  memcpy(ptr, r->m_sb.sb_start, nRead);
-	  r->m_sb.sb_start += nRead;
-	  r->m_sb.sb_size -= nRead;
-	  nBytes = nRead;
-	  r->m_nBytesIn += nRead;
-	  if (r->m_bSendCounter
-	      && r->m_nBytesIn > ( r->m_nBytesInSent + r->m_nClientBW / 10))
-	    if (!SendBytesReceived(r))
-	        return FALSE;
-	}
-      /*RTMP_Log(RTMP_LOGDEBUG, "%s: %d bytes\n", __FUNCTION__, nBytes); */
+            }
+            if (r->m_resplen && !r->m_sb.sb_size)
+                RTMPSockBuf_Fill(&r->m_sb);
+            avail = r->m_sb.sb_size;
+            if (avail > r->m_resplen)
+                avail = r->m_resplen;
+        } else {
+            RTMP_Log(RTMP_LOGDEBUG, "%s: protocol is not HTTP, instead: %i", __FUNCTION__, r->Link.protocol);
+            avail = r->m_sb.sb_size;
+            if (avail == 0) {
+                if (RTMPSockBuf_Fill(&r->m_sb) < 1) {
+                    if (!r->m_sb.sb_timedout) {
+                        RTMP_Log(RTMP_LOGDEBUG, "%s: timed out", __FUNCTION__);
+                        RTMP_Close(r);
+                    }
+                    return RTMP_Log_return(FALSE, RTMP_LOGDEBUG, "%s: FAIL 3", __FUNCTION__);
+                }
+                avail = r->m_sb.sb_size;
+            }
+        }
+        nRead = ((n < avail) ? n : avail);
+        if (nRead > 0) {
+            memcpy(ptr, r->m_sb.sb_start, nRead);
+            r->m_sb.sb_start += nRead;
+            r->m_sb.sb_size -= nRead;
+            nBytes = nRead;
+            r->m_nBytesIn += nRead;
+            if (r->m_bSendCounter
+                && r->m_nBytesIn > (r->m_nBytesInSent + r->m_nClientBW / 10))
+                if (!SendBytesReceived(r))
+                    return RTMP_Log_return(FALSE, RTMP_LOGDEBUG, "%s: FAIL 4", __FUNCTION__);
+        }
+        /*RTMP_Log(RTMP_LOGDEBUG, "%s: %d bytes\n", __FUNCTION__, nBytes); */
 #ifdef _DEBUG
-      fwrite(ptr, 1, nBytes, netstackdump_read);
+        fwrite(ptr, 1, nBytes, netstackdump_read);
 #endif
 
-      if (nBytes == 0)
-	{
-	  RTMP_Log(RTMP_LOGDEBUG, "%s, RTMP socket closed by peer", __FUNCTION__);
-	  /*goto again; */
-	  RTMP_Close(r);
-	  break;
-	}
+        if (nBytes == 0) {
+            RTMP_Log(RTMP_LOGDEBUG, "%s, RTMP socket closed by peer", __FUNCTION__);
+            /*goto again; */
+            RTMP_Close(r);
+            break;
+        }
 
-      if (r->Link.protocol & RTMP_FEATURE_HTTP)
-	r->m_resplen -= nBytes;
+        if (r->Link.protocol & RTMP_FEATURE_HTTP)
+            r->m_resplen -= nBytes;
 
 #ifdef CRYPTO
-      if (r->Link.rc4keyIn)
-	{
-	  RC4_encrypt(r->Link.rc4keyIn, nBytes, ptr);
-	}
+        if (r->Link.rc4keyIn)
+      {
+        RC4_encrypt(r->Link.rc4keyIn, nBytes, ptr);
+      }
 #endif
 
-      n -= nBytes;
-      ptr += nBytes;
+        n -= nBytes;
+        ptr += nBytes;
     }
 
-  return nOriginalSize - n;
+    //return RTMP_Log_return(FALSE, RTMP_LOGDEBUG, "%s: FAIL 2", __FUNCTION__);
+    return nOriginalSize - n;
 }
 
 static int
@@ -3565,11 +3553,13 @@ RTMP_ReadPacket(RTMP *r, RTMPPacket *packet)
 
   RTMP_Log(RTMP_LOGDEBUG2, "%s: fd=%d", __FUNCTION__, r->m_sb.sb_socket);
 
-  if (ReadN(r, (char *)hbuf, 1) == 0)
+    int firstPacketReadResult = ReadN(r, (char *)hbuf, 1);
+    if (firstPacketReadResult == 0)
     {
-      RTMP_Log(RTMP_LOGERROR, "%s, failed to read RTMP packet header", __FUNCTION__);
+      RTMP_Log(RTMP_LOGERROR, "%s, failed to read RTMP packet header, result: %i", __FUNCTION__, firstPacketReadResult);
       return FALSE;
     }
+    RTMP_Log(RTMP_LOGERROR, "%s, successfully read RTMP packet header, result: %i", __FUNCTION__, firstPacketReadResult);
 
   packet->m_headerType = (hbuf[0] & 0xc0) >> 6;
   packet->m_nChannel = (hbuf[0] & 0x3f);
@@ -4241,48 +4231,47 @@ RTMP_Close(RTMP *r)
 }
 
 int
-RTMPSockBuf_Fill(RTMPSockBuf *sb)
-{
-  int nBytes;
+RTMPSockBuf_Fill(RTMPSockBuf *sb) {
+    int nBytes;
 
-  if (!sb->sb_size)
-    sb->sb_start = sb->sb_buf;
+    if (!sb->sb_size)
+        sb->sb_start = sb->sb_buf;
 
-  while (1)
-    {
-      nBytes = sizeof(sb->sb_buf) - 1 - sb->sb_size - (sb->sb_start - sb->sb_buf);
+    while (TRUE) {
+        const size_t magicNumber1 = sizeof(sb->sb_buf);
+        const int magicNumber2 = 1 - sb->sb_size;
+        const unsigned long magicNumber3 = sb->sb_start - sb->sb_buf;
+        nBytes = magicNumber1 - magicNumber2 - magicNumber3;
+        RTMP_Log(RTMP_LOGDEBUG, "%s: nBytes before: %i", __FUNCTION__, nBytes);
 #if defined(CRYPTO) && !defined(NO_SSL)
-      if (sb->sb_ssl)
-	{
-	  nBytes = TLS_read(sb->sb_ssl, sb->sb_start + sb->sb_size, nBytes);
-	}
-      else
+        if (sb->sb_ssl) {
+            nBytes = TLS_read(sb->sb_ssl, sb->sb_start + sb->sb_size, nBytes);
+        } else 
 #endif
-	{
-	  nBytes = recv(sb->sb_socket, sb->sb_start + sb->sb_size, nBytes, 0);
-	}
-      if (nBytes != -1)
-	{
-	  sb->sb_size += nBytes;
-	}
-      else
-	{
-	  int sockerr = GetSockError();
-	  RTMP_Log(RTMP_LOGDEBUG, "%s, recv returned %d. GetSockError(): %d (%s)",
-	      __FUNCTION__, nBytes, sockerr, strerror(sockerr));
-	  if (sockerr == EINTR && !RTMP_ctrlC)
-	    continue;
+        {
+            nBytes = recv(sb->sb_socket, sb->sb_start + sb->sb_size, nBytes, 0);
+            RTMP_Log(RTMP_LOGDEBUG, "%s: nBytes after: %i", __FUNCTION__, nBytes);
+        }
+        if (nBytes != -1) {
+            sb->sb_size += nBytes;
+        } else {
+            int sockerr = GetSockError();
+            RTMP_Log(RTMP_LOGDEBUG, "%s: recv returned %d. GetSockError(): %d (%s)", __FUNCTION__, nBytes, sockerr, strerror(sockerr));
+            if (sockerr == EINTR && !RTMP_ctrlC) {
+                RTMP_Log(RTMP_LOGDEBUG, "%s: if (sockerr == EINTR && !RTMP_ctrlC) {",__FUNCTION__);
+                continue;
+            }
 
-	  if (sockerr == EWOULDBLOCK || sockerr == EAGAIN)
-	    {
-	      sb->sb_timedout = TRUE;
-	      nBytes = 0;
-	    }
-	}
-      break;
+            if (sockerr == EWOULDBLOCK || sockerr == EAGAIN) {
+                RTMP_Log(RTMP_LOGDEBUG, "%s: if (sockerr == EWOULDBLOCK || sockerr == EAGAIN) {",__FUNCTION__);
+                sb->sb_timedout = TRUE;
+                nBytes = 0;
+            }
+        }
+        break;
     }
 
-  return nBytes;
+    return nBytes;
 }
 
 int

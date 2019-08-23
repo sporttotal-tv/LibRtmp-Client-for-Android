@@ -51,6 +51,7 @@ void RTMP_LogSetOutput(FILE *file);
 #ifdef __GNUC__
 void RTMP_LogPrintf(const char *format, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 void RTMP_LogStatus(const char *format, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int RTMP_Log_return(int result, int level, const char *format, ...) __attribute__ ((__format__ (__printf__, 3, 4)));
 void RTMP_Log(int level, const char *format, ...) __attribute__ ((__format__ (__printf__, 2, 3)));
 #else
 void RTMP_LogPrintf(const char *format, ...);
